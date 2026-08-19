@@ -6,23 +6,22 @@ import requests
 from telegram import Update
 from telegram.ext import ApplicationBuilder, CommandHandler, ContextTypes
 
-# --- Servidor HTTP ligero para el health check de Render ---
+# --- Servidor HTTP ligero para Render ---
 class HealthCheckHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         self.send_response(200)
         self.send_header("Content-type", "text/plain")
         self.end_headers()
-        self.wfile.write(b"Bot activo y escuchando")
+        self.wfile.write(b"Bot activo")
 
     def log_message(self, format, *args):
-        pass  # Silencia los logs de peticiones HTTP para mantener limpia la consola
+        pass
 
 def run_health_server():
     port = int(os.environ.get("PORT", 8080))
     server = HTTPServer(("0.0.0.0", port), HealthCheckHandler)
     server.serve_forever()
 
-# Iniciar servidor web en un hilo independiente
 threading.Thread(target=run_health_server, daemon=True).start()
 
 # --- Configuración de Logs ---
@@ -31,7 +30,6 @@ logging.basicConfig(
     level=logging.INFO
 )
 
-# Carga de variables de entorno
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 API_BASE_URL = os.environ.get("API_BASE_URL", "https://transfermarkt-api.fly.dev")
 
@@ -39,7 +37,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "¡Hola! Soy tu bot de Transfermarkt.\n\n"
         "Comandos disponibles:\n"
-        "• `/fichaje <nombre_jugador>` - Consulta el historial de traspasos de un jugador.",
+        "• `/fichaje <nombre_jugador>` - Consulta el historial de traspasos.",
         parse_mode="Markdown"
     )
 
@@ -57,7 +55,6 @@ async def buscar_fichaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
     headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
 
     try:
-        # 1. Búsqueda del ID del jugador
         base_url = API_BASE_URL.rstrip('/')
         search_res = requests.get(f"{base_url}/players/search/{nombre_jugador}", headers=headers, timeout=10)
         
@@ -68,8 +65,9 @@ async def buscar_fichaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
         jugador = search_res.json()["results"][0]
         player_id = jugador["id"]
         player_name = jugador["name"]
+        club_actual = jugador.get("club", {}).get("name", "N/A")
 
-        # 2. Búsqueda de los fichajes del jugador
+        # Petición a los fichajes del jugador
         transfers_res = requests.get(f"{base_url}/players/{player_id}/transfers", headers=headers, timeout=10)
         
         if transfers_res.status_code == 200:
@@ -77,26 +75,40 @@ async def buscar_fichaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
             transfers = data.get("transfers", [])
             
             if not transfers:
-                await update.message.reply_text(f"No hay registros de traspasos disponibles para {player_name}.")
+                await update.message.reply_text(f"No hay registros de traspasos para {player_name}.")
                 return
 
-            # Extraer el último traspaso registrado
             ultimo = transfers[0]
-            origen = ultimo.get("from", {}).get("clubName", "Desconocido")
-            destino = ultimo.get("to", {}).get("clubName", "Desconocido")
+            
+            # Extracción flexible de nombres de clubes (soporta name o clubName)
+            club_origen = (
+                ultimo.get("from", {}).get("name") or 
+                ultimo.get("from", {}).get("clubName") or 
+                "Desconocido"
+            )
+            
+            club_destino = (
+                ultimo.get("to", {}).get("name") or 
+                ultimo.get("to", {}).get("clubName") or 
+                "Desconocido"
+            )
+
             precio = ultimo.get("fee", "N/A")
             temporada = ultimo.get("season", "N/A")
+            fecha = ultimo.get("date", "N/A")
 
             mensaje = (
                 f"⚽ *Fichaje de {player_name}*\n\n"
+                f"• *Club Actual:* {club_actual}\n"
                 f"• *Temporada:* {temporada}\n"
-                f"• *Origen:* {origen}\n"
-                f"• *Destino:* {destino}\n"
+                f"• *Fecha:* {fecha}\n"
+                f"• *Origen:* {club_origen}\n"
+                f"• *Destino:* {club_destino}\n"
                 f"• *Coste/Valor:* {precio}\n"
             )
             await update.message.reply_text(mensaje, parse_mode="Markdown")
         else:
-            await update.message.reply_text("Ocurrió un error al consultar el historial de fichajes.")
+            await update.message.reply_text("Error al consultar el historial de fichajes.")
 
     except Exception as e:
         logging.error(f"Error en la petición: {e}")
@@ -111,7 +123,7 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("fichaje", buscar_fichaje))
     
-    logging.info("Bot en marcha y escuchando peticiones...")
+    logging.info("Bot en marcha...")
     app.run_polling()
 
 if __name__ == "__main__":
