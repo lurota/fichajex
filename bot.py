@@ -33,33 +33,47 @@ logging.basicConfig(
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 API_BASE_URL = os.environ.get("API_BASE_URL", "https://transfermarkt-api.fly.dev")
 
-def extraer_nombre(valor):
-    """Extrae el nombre ya sea si viene como String o como Diccionario/Objeto."""
-    if not valor:
+def extraer_nombre_club(objeto):
+    """Busca un nombre de club recorriendo cadenas o diccionarios anidados."""
+    if not objeto:
         return None
-    if isinstance(valor, str):
-        return valor
-    if isinstance(valor, dict):
-        return (
-            valor.get("name") or 
-            valor.get("clubName") or 
-            valor.get("title") or 
-            valor.get("club", {}).get("name")
-        )
+    if isinstance(objeto, str):
+        return objeto
+    if isinstance(objeto, dict):
+        # Probar claves comunes en el objeto
+        for clave in ["name", "clubName", "title", "fullName"]:
+            if objeto.get(clave):
+                return objeto[clave]
+        # Probar en un sub-objeto 'club' o 'from'
+        if objeto.get("club"):
+            return extraer_nombre_club(objeto["club"])
     return None
 
-def obtener_club_anterior(ultimo_traspaso):
-    """Prueba todas las claves posibles que usan distintas versiones de la API."""
-    if not isinstance(ultimo_traspaso, dict):
+def resolver_club_anterior(transfers):
+    """
+    Intenta obtener el club anterior desde el último traspaso (transfers[0])
+    o desde el movimiento previo en el historial (transfers[1]).
+    """
+    if not transfers or not isinstance(transfers, list):
         return "Desconocido"
 
-    # Claves habituales: 'left' (club abandonado), 'from', 'fromClub', 'oldClub'
-    posibles_claves = ["left", "from", "fromClub", "fromClubName", "oldClub"]
+    ultimo = transfers[0] if len(transfers) > 0 else {}
     
+    # 1. Buscar en las claves del último traspaso
+    posibles_claves = ["from", "left", "fromClub", "fromClubName", "oldClub"]
     for clave in posibles_claves:
-        res = extraer_nombre(ultimo_traspaso.get(clave))
-        if res:
-            return res
+        nombre = extraer_nombre_club(ultimo.get(clave))
+        if nombre:
+            return nombre
+
+    # 2. Si el último traspaso no tiene origen, buscar el club de destino del movimiento anterior
+    if len(transfers) > 1:
+        anterior_movimiento = transfers[1]
+        posibles_claves_destino = ["to", "joined", "toClub", "toClubName", "newClub"]
+        for clave in posibles_claves_destino:
+            nombre = extraer_nombre_club(anterior_movimiento.get(clave))
+            if nombre:
+                return nombre
 
     return "Desconocido"
 
@@ -96,9 +110,9 @@ async def buscar_fichaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
         player_id = jugador["id"]
         player_name = jugador["name"]
         
-        club_actual = extraer_nombre(jugador.get("club")) or "N/A"
+        club_actual = extraer_nombre_club(jugador.get("club")) or "N/A"
 
-        # Petición a los fichajes
+        # Petición a los fichajes del jugador
         transfers_res = requests.get(f"{base_url}/players/{player_id}/transfers", headers=headers, timeout=10)
         
         if transfers_res.status_code == 200:
@@ -111,10 +125,10 @@ async def buscar_fichaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             ultimo = transfers[0]
             
-            # IMPRIMIR EN LOGS PARA DIAGNÓSTICO
-            logging.info(f"JSON RECIBIDO PARA {player_name}: {ultimo}")
+            # Imprimir en los logs de Render para depuración si fuese necesario
+            logging.info(f"DATOS_FICHAJE: {ultimo}")
 
-            club_anterior = obtener_club_anterior(ultimo)
+            club_anterior = resolver_club_anterior(transfers)
             precio = ultimo.get("fee") or ultimo.get("marketValue") or "N/A"
             temporada = ultimo.get("season", "N/A")
             fecha = ultimo.get("date", "N/A")
