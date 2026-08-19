@@ -80,16 +80,10 @@ async def buscar_fichaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             ultimo = transfers[0]
             
-            # Extracción flexible de nombres de clubes (soporta name o clubName)
-            club_origen = (
+            # Obtener el club anterior (de donde venía en el último traspaso)
+            club_anterior = (
                 ultimo.get("from", {}).get("name") or 
                 ultimo.get("from", {}).get("clubName") or 
-                "Desconocido"
-            )
-            
-            club_destino = (
-                ultimo.get("to", {}).get("name") or 
-                ultimo.get("to", {}).get("clubName") or 
                 "Desconocido"
             )
 
@@ -100,10 +94,9 @@ async def buscar_fichaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
             mensaje = (
                 f"⚽ *Fichaje de {player_name}*\n\n"
                 f"• *Club Actual:* {club_actual}\n"
+                f"• *Club Anterior:* {club_anterior}\n"
                 f"• *Temporada:* {temporada}\n"
                 f"• *Fecha:* {fecha}\n"
-                f"• *Origen:* {club_origen}\n"
-                f"• *Destino:* {club_destino}\n"
                 f"• *Coste/Valor:* {precio}\n"
             )
             await update.message.reply_text(mensaje, parse_mode="Markdown")
