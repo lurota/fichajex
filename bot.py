@@ -33,19 +33,35 @@ logging.basicConfig(
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 API_BASE_URL = os.environ.get("API_BASE_URL", "https://transfermarkt-api.fly.dev")
 
-def obtener_nombre_club(datos_club):
-    """Busca de forma flexible el nombre del club en cualquier estructura que devuelva la API."""
-    if not datos_club or not isinstance(datos_club, dict):
+def extraer_nombre(valor):
+    """Extrae el nombre ya sea si viene como String o como Diccionario/Objeto."""
+    if not valor:
+        return None
+    if isinstance(valor, str):
+        return valor
+    if isinstance(valor, dict):
+        return (
+            valor.get("name") or 
+            valor.get("clubName") or 
+            valor.get("title") or 
+            valor.get("club", {}).get("name")
+        )
+    return None
+
+def obtener_club_anterior(ultimo_traspaso):
+    """Prueba todas las claves posibles que usan distintas versiones de la API."""
+    if not isinstance(ultimo_traspaso, dict):
         return "Desconocido"
+
+    # Claves habituales: 'left' (club abandonado), 'from', 'fromClub', 'oldClub'
+    posibles_claves = ["left", "from", "fromClub", "fromClubName", "oldClub"]
     
-    # Prueba todas las variantes conocidas del objeto club
-    return (
-        datos_club.get("name") or 
-        datos_club.get("clubName") or 
-        datos_club.get("club", {}).get("name") or 
-        datos_club.get("club", {}).get("clubName") or 
-        "Desconocido"
-    )
+    for clave in posibles_claves:
+        res = extraer_nombre(ultimo_traspaso.get(clave))
+        if res:
+            return res
+
+    return "Desconocido"
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
@@ -80,10 +96,9 @@ async def buscar_fichaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
         player_id = jugador["id"]
         player_name = jugador["name"]
         
-        # Extraer club actual
-        club_actual = obtener_nombre_club(jugador.get("club"))
+        club_actual = extraer_nombre(jugador.get("club")) or "N/A"
 
-        # Petición a los fichajes del jugador
+        # Petición a los fichajes
         transfers_res = requests.get(f"{base_url}/players/{player_id}/transfers", headers=headers, timeout=10)
         
         if transfers_res.status_code == 200:
@@ -96,10 +111,11 @@ async def buscar_fichaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             ultimo = transfers[0]
             
-            # Extraer club anterior
-            club_anterior = obtener_nombre_club(ultimo.get("from"))
+            # IMPRIMIR EN LOGS PARA DIAGNÓSTICO
+            logging.info(f"JSON RECIBIDO PARA {player_name}: {ultimo}")
 
-            precio = ultimo.get("fee", "N/A")
+            club_anterior = obtener_club_anterior(ultimo)
+            precio = ultimo.get("fee") or ultimo.get("marketValue") or "N/A"
             temporada = ultimo.get("season", "N/A")
             fecha = ultimo.get("date", "N/A")
 
