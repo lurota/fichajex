@@ -33,6 +33,20 @@ logging.basicConfig(
 TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN")
 API_BASE_URL = os.environ.get("API_BASE_URL", "https://transfermarkt-api.fly.dev")
 
+def obtener_nombre_club(datos_club):
+    """Busca de forma flexible el nombre del club en cualquier estructura que devuelva la API."""
+    if not datos_club or not isinstance(datos_club, dict):
+        return "Desconocido"
+    
+    # Prueba todas las variantes conocidas del objeto club
+    return (
+        datos_club.get("name") or 
+        datos_club.get("clubName") or 
+        datos_club.get("club", {}).get("name") or 
+        datos_club.get("club", {}).get("clubName") or 
+        "Desconocido"
+    )
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "¡Hola! Soy tu bot de Transfermarkt.\n\n"
@@ -65,7 +79,9 @@ async def buscar_fichaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
         jugador = search_res.json()["results"][0]
         player_id = jugador["id"]
         player_name = jugador["name"]
-        club_actual = jugador.get("club", {}).get("name", "N/A")
+        
+        # Extraer club actual
+        club_actual = obtener_nombre_club(jugador.get("club"))
 
         # Petición a los fichajes del jugador
         transfers_res = requests.get(f"{base_url}/players/{player_id}/transfers", headers=headers, timeout=10)
@@ -80,12 +96,8 @@ async def buscar_fichaje(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
             ultimo = transfers[0]
             
-            # Obtener el club anterior (de donde venía en el último traspaso)
-            club_anterior = (
-                ultimo.get("from", {}).get("name") or 
-                ultimo.get("from", {}).get("clubName") or 
-                "Desconocido"
-            )
+            # Extraer club anterior
+            club_anterior = obtener_nombre_club(ultimo.get("from"))
 
             precio = ultimo.get("fee", "N/A")
             temporada = ultimo.get("season", "N/A")
